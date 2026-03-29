@@ -14,16 +14,16 @@ if (!API_KEY) {
 }
 
 // HTTP helper
-async function api(method, path, body) {
+async function api(method, path, body, blog) {
   const url = `${API_URL}${path}`;
-  const options = {
-    method,
-    headers: {
-      "X-API-Key": API_KEY,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
+  const headers = {
+    "X-API-Key": API_KEY,
+    "Content-Type": "application/json",
+    "Accept": "application/json",
   };
+  if (blog) headers["X-Blog"] = blog;
+
+  const options = { method, headers };
   if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url, options);
@@ -38,17 +38,30 @@ async function api(method, path, body) {
 // Create MCP server
 const server = new McpServer({
   name: "taita-blog",
-  version: "1.0.0",
+  version: "1.1.0",
 });
 
 // --- Tools ---
 
 server.tool(
+  "list_blogs",
+  "List all blogs accessible with this API key. Use this first to see which blogs you can manage.",
+  {},
+  async () => {
+    const result = await api("GET", "/blogs");
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+);
+
+server.tool(
   "create_post",
-  "Create a new blog post on Taita. Requires title and content (HTML). Optionally set category (by name or slug), tags (auto-created if new), status (draft/published), excerpt, and featured image URL.",
+  "Create a new blog post. Requires title and content (HTML). If the API key has access to multiple blogs, specify the blog subdomain.",
   {
     title: z.string().describe("Post title"),
     content: z.string().describe("Post content in HTML format"),
+    blog: z.string().optional().describe("Blog subdomain (required if API key has access to multiple blogs)"),
     excerpt: z.string().optional().describe("Short summary of the post"),
     slug: z.string().optional().describe("URL slug (auto-generated from title if omitted)"),
     category: z.string().optional().describe("Category name or slug"),
@@ -56,8 +69,8 @@ server.tool(
     status: z.enum(["draft", "published"]).optional().default("draft").describe("Publish status"),
     image: z.string().optional().describe("Featured image URL"),
   },
-  async (params) => {
-    const result = await api("POST", "/posts", params);
+  async ({ blog, ...params }) => {
+    const result = await api("POST", "/posts", params, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -68,17 +81,18 @@ server.tool(
   "list_posts",
   "List blog posts. Filter by status (draft/published). Returns paginated results.",
   {
+    blog: z.string().optional().describe("Blog subdomain (required if API key has access to multiple blogs)"),
     status: z.enum(["draft", "published"]).optional().describe("Filter by publish status"),
     page: z.number().optional().default(1).describe("Page number"),
     limit: z.number().optional().default(20).describe("Posts per page (max 100)"),
   },
-  async (params) => {
+  async ({ blog, ...params }) => {
     const query = new URLSearchParams();
     if (params.status) query.set("status", params.status);
     if (params.page) query.set("page", String(params.page));
     if (params.limit) query.set("limit", String(params.limit));
     const qs = query.toString();
-    const result = await api("GET", `/posts${qs ? `?${qs}` : ""}`);
+    const result = await api("GET", `/posts${qs ? `?${qs}` : ""}`, null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -90,9 +104,10 @@ server.tool(
   "Get a single blog post by its slug. Returns full content, metadata, category, tags, and author.",
   {
     slug: z.string().describe("The post's URL slug"),
+    blog: z.string().optional().describe("Blog subdomain"),
   },
-  async ({ slug }) => {
-    const result = await api("GET", `/posts/${encodeURIComponent(slug)}`);
+  async ({ slug, blog }) => {
+    const result = await api("GET", `/posts/${encodeURIComponent(slug)}`, null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -104,6 +119,7 @@ server.tool(
   "Update an existing blog post. Identify the post by slug, then provide any fields to update.",
   {
     slug: z.string().describe("The slug of the post to update"),
+    blog: z.string().optional().describe("Blog subdomain"),
     title: z.string().optional().describe("New title"),
     content: z.string().optional().describe("New content in HTML format"),
     excerpt: z.string().optional().describe("New excerpt"),
@@ -112,8 +128,8 @@ server.tool(
     status: z.enum(["draft", "published"]).optional().describe("New publish status"),
     image: z.string().optional().describe("New featured image URL"),
   },
-  async ({ slug, ...updates }) => {
-    const result = await api("PATCH", `/posts/${encodeURIComponent(slug)}`, updates);
+  async ({ slug, blog, ...updates }) => {
+    const result = await api("PATCH", `/posts/${encodeURIComponent(slug)}`, updates, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -125,9 +141,10 @@ server.tool(
   "Permanently delete a blog post by its slug.",
   {
     slug: z.string().describe("The slug of the post to delete"),
+    blog: z.string().optional().describe("Blog subdomain"),
   },
-  async ({ slug }) => {
-    const result = await api("DELETE", `/posts/${encodeURIComponent(slug)}`);
+  async ({ slug, blog }) => {
+    const result = await api("DELETE", `/posts/${encodeURIComponent(slug)}`, null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -137,9 +154,11 @@ server.tool(
 server.tool(
   "list_categories",
   "List all blog categories with their post counts.",
-  {},
-  async () => {
-    const result = await api("GET", "/categories");
+  {
+    blog: z.string().optional().describe("Blog subdomain"),
+  },
+  async ({ blog }) => {
+    const result = await api("GET", "/categories", null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
@@ -149,9 +168,11 @@ server.tool(
 server.tool(
   "list_tags",
   "List all blog tags with their post counts.",
-  {},
-  async () => {
-    const result = await api("GET", "/tags");
+  {
+    blog: z.string().optional().describe("Blog subdomain"),
+  },
+  async ({ blog }) => {
+    const result = await api("GET", "/tags", null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
