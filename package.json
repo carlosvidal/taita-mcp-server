@@ -1,0 +1,21 @@
+{
+  "name": "taita-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Taita Blog API - manage blog posts from Claude Desktop, Claude Code, or any MCP client",
+  "type": "module",
+  "bin": {
+    "taita-mcp-server": "./index.js"
+  },
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "keywords": ["mcp", "blog", "taita", "llm", "ai", "claude"],
+  "license": "MIT"
+}
