@@ -38,7 +38,7 @@ async function api(method, path, body, blog) {
 // Create MCP server
 const server = new McpServer({
   name: "taita-blog",
-  version: "1.1.0",
+  version: "1.2.0",
 });
 
 // --- Tools ---
@@ -145,6 +145,42 @@ server.tool(
   },
   async ({ slug, blog }) => {
     const result = await api("DELETE", `/posts/${encodeURIComponent(slug)}`, null, blog);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+);
+
+server.tool(
+  "upload_image",
+  "Upload an image to the blog's media library from a public URL. Returns the hosted image URL that can be used as a featured image in create_post or update_post.",
+  {
+    url: z.string().describe("Public URL of the image to upload"),
+    filename: z.string().optional().describe("Optional filename (defaults to URL basename)"),
+    blog: z.string().optional().describe("Blog subdomain (required if API key has access to multiple blogs)"),
+  },
+  async ({ url, filename, blog }) => {
+    const result = await api("POST", "/media/upload-url", { url, filename }, blog);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  }
+);
+
+server.tool(
+  "list_media",
+  "List media files in the blog's library. Returns URLs and metadata.",
+  {
+    blog: z.string().optional().describe("Blog subdomain"),
+    page: z.number().optional().default(1).describe("Page number"),
+    limit: z.number().optional().default(20).describe("Items per page"),
+  },
+  async ({ blog, ...params }) => {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.limit) query.set("limit", String(params.limit));
+    const qs = query.toString();
+    const result = await api("GET", `/media${qs ? `?${qs}` : ""}`, null, blog);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     };
