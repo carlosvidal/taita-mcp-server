@@ -153,16 +153,63 @@ server.tool(
 
 server.tool(
   "upload_image",
-  "Upload an image to the blog's media library from a public URL. Returns the hosted image URL that can be used as a featured image in create_post or update_post.",
+  "Upload an image to the blog's media library from a public URL. The MCP downloads the image locally and uploads it to the API as multipart. Returns the hosted image URL that can be used as a featured image in create_post or update_post.",
   {
     url: z.string().describe("Public URL of the image to upload"),
     filename: z.string().optional().describe("Optional filename (defaults to URL basename)"),
     blog: z.string().optional().describe("Blog subdomain (required if API key has access to multiple blogs)"),
   },
-  async ({ url, filename, blog }) => {
-    const result = await api("POST", "/media/upload-url", { url, filename }, blog);
+  async ({ url: imageUrl, filename, blog }) => {
+    // Download image locally (MCP runs on user's machine, avoids geo-blocking)
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) {
+      throw new Error(`Failed to download image: ${imgRes.status} ${imgRes.statusText}`);
+    }
+    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    const fname = filename || new URL(imageUrl).pathname.split("/").pop() || "image.jpg";
+
+    // Build multipart form data
+    const boundary = `----TaitaMCP${Date.now()}`;
+    const parts = [];
+
+    // image file part
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="image"; filename="${fname}"\r\n` +
+      `Content-Type: ${contentType}\r\n\r\n`
+    );
+    parts.push(buffer);
+    parts.push("\r\n");
+
+    // entityType part
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="entityType"\r\n\r\n` +
+      `general\r\n`
+    );
+
+    parts.push(`--${boundary}--\r\n`);
+
+    // Combine into a single buffer
+    const body = Buffer.concat(parts.map(p => typeof p === "string" ? Buffer.from(p) : p));
+
+    const uploadUrl = `${API_URL}/media/upload`;
+    const headers = {
+      "X-API-Key": API_KEY,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    };
+    if (blog) headers["X-Blog"] = blog;
+
+    const res = await fetch(uploadUrl, { method: "POST", headers, body });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.message || data.error || `Upload failed: ${res.status}`);
+    }
+
     return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
     };
   }
 );
